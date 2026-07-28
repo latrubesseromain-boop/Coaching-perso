@@ -22,26 +22,28 @@ const C = {
 const FD = "'Barlow Condensed','Oswald','Arial Narrow',system-ui,sans-serif";
 const FB = "'Barlow',system-ui,-apple-system,sans-serif";
 
-/* ---------- Valeurs par défaut = vraies données Strava (11/07/2026) ------ */
+/* ---------- Valeurs par défaut (secours) = profil de Romain -------------- */
+/* Le poids et la FTP réels viennent de Strava (/api/config) une fois connecté ;
+   ces valeurs ne servent que de repli hors-ligne / avant première sync. */
 const DEFAULTS = {
-  firstName: "Julien",
-  weight: 87.9,          // dernière pesée réelle (Garmin, 12/07/2026)
-  ftp: 300,              // Strava zones (réglé manuellement, non estimé)
+  firstName: "Romain",
+  weight: 74.4,          // pesée de référence (balance Terraillon)
+  ftp: 300,              // ~300 W (test FTP à confirmer) — piloté par Strava
   ftpEstimated: false,
-  goalWeight: 85,        // dérivé de la cible ~4 W/kg
+  goalWeight: 64,        // poids cible (sec, ~4 W/kg à 256 W)
   wkgTarget: 4.0,
-  event: { name: "Trail des Braconniers", detail: "60 km · 3 000 m D+ · Collobrières", date: "2027-05-15" },
-  nearEvent: { name: "Étape du Tour", date: "2026-07-19" }, // focus Strava en cours
-  sleep: { hours: "7 h 25", score: 79 },
+  event: { name: "Trail des Maures 100 km", detail: "100 km · Collobrières (Massif des Maures)", date: "2027-05-15" },
+  nearEvent: { name: "Nageur sauveteur héliporté", date: "2027-01-31" }, // priorité n°1 transversale
+  sleep: { hours: "8 h 30", score: 84 },
   stravaConnected: false, // vrai uniquement via l'API
 };
 
 const DEMO_ACTIVITIES = [
-  { id: "a1", type: "Ride", name: "Séance endurance", date: "2026-07-11", dist: 86.0, elev: 1100, dur: 12885 },
-  { id: "a2", type: "Ride", name: "Vélo taf (Z2)", date: "2026-07-09", dist: 40.1, elev: 399, dur: 5480 },
-  { id: "a3", type: "WeightTraining", name: "Musculation · Half body", date: "2026-07-08", dist: 0, elev: 0, dur: 2596 },
-  { id: "a4", type: "WeightTraining", name: "Musculation · Half body", date: "2026-07-06", dist: 0, elev: 0, dur: 3347 },
-  { id: "a5", type: "Ride", name: "Séance spécifique", date: "2026-07-04", dist: 96.1, elev: 1306, dur: 11974 },
+  { id: "a1", type: "Ride", name: "Sortie longue Z2", date: "2026-08-01", dist: 90.0, elev: 1200, dur: 12600 },
+  { id: "a2", type: "Ride", name: "Sweet spot", date: "2026-07-30", dist: 45.0, elev: 500, dur: 5400 },
+  { id: "a3", type: "WeightTraining", name: "Muscu · Haut du corps", date: "2026-07-29", dist: 0, elev: 0, dur: 3000 },
+  { id: "a4", type: "Run", name: "Endurance fondamentale", date: "2026-07-28", dist: 9.0, elev: 120, dur: 3600 },
+  { id: "a5", type: "WeightTraining", name: "Muscu · Bas du corps", date: "2026-07-27", dist: 0, elev: 0, dur: 3000 },
 ];
 
 /* ----------------------- Groupes musculaires --------------------------- */
@@ -440,7 +442,8 @@ function parseGarminSleepWeekly(text) {
   return rows;
 }
 
-// Données réelles de Julien (exports Garmin : poids/masse grasse/masse musculaire + sommeil hebdo)
+// Données de démonstration (repli hors-ligne uniquement — les vraies pesées
+// viennent de Strava / de la saisie manuelle une fois l'app connectée).
 function seedMetrics() {
   return [
     { date: "2026-06-03", weight: 88.1, fat: 22.1, muscle: 35.6, sleep_hours: 7.6, sleep_score: 89 },
@@ -2231,7 +2234,7 @@ function Settings({ cfg, live, onSave, onBack }) {
 
   const save = async () => {
     const patch = {
-      firstName: form.firstName.trim() || "Julien",
+      firstName: form.firstName.trim() || "Romain",
       goalWeight: numFR(form.goalWeight),
       wkgTarget: numFR(form.wkgTarget),
       event: { name: form.eventName.trim(), detail: form.eventDetail.trim(), date: form.eventDate },
@@ -2261,7 +2264,7 @@ function Settings({ cfg, live, onSave, onBack }) {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
           <SettingsField label="POIDS OBJECTIF (KG)">
-            <TextInput value={form.goalWeight} onChange={set("goalWeight")} placeholder="85" />
+            <TextInput value={form.goalWeight} onChange={set("goalWeight")} placeholder="64" />
           </SettingsField>
           <SettingsField label="CIBLE W/KG">
             <TextInput value={form.wkgTarget} onChange={set("wkgTarget")} placeholder="4,0" />
@@ -2272,11 +2275,11 @@ function Settings({ cfg, live, onSave, onBack }) {
       <SectionTitle>Objectif principal</SectionTitle>
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
         <SettingsField label="NOM DE L'ÉVÉNEMENT">
-          <TextInput value={form.eventName} onChange={set("eventName")} placeholder="Trail des Braconniers" />
+          <TextInput value={form.eventName} onChange={set("eventName")} placeholder="Trail des Maures 100 km" />
         </SettingsField>
         <div style={{ marginTop: 12 }}>
           <SettingsField label="DÉTAIL (DISTANCE · D+ · LIEU)">
-            <TextInput value={form.eventDetail} onChange={set("eventDetail")} placeholder="60 km · 3 000 m D+ · Collobrières" />
+            <TextInput value={form.eventDetail} onChange={set("eventDetail")} placeholder="100 km · Collobrières (Massif des Maures)" />
           </SettingsField>
         </div>
         <div style={{ marginTop: 12 }}>
@@ -2289,7 +2292,7 @@ function Settings({ cfg, live, onSave, onBack }) {
       <SectionTitle>Focus en cours</SectionTitle>
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
         <SettingsField label="NOM">
-          <TextInput value={form.nearName} onChange={set("nearName")} placeholder="Étape du Tour" />
+          <TextInput value={form.nearName} onChange={set("nearName")} placeholder="Nageur sauveteur héliporté" />
         </SettingsField>
         <div style={{ marginTop: 12 }}>
           <SettingsField label="DATE">

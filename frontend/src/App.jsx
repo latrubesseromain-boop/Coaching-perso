@@ -679,6 +679,14 @@ export default function App() {
     if (live) { try { await apiPost("/api/program/delete", { start }); } catch (e) {} }
   };
 
+  /* ---- Réglages personnels (prénom, objectifs, événements…) ---- */
+  const saveSettings = async (patch) => {
+    // maj optimiste de l'état local
+    setCfg((c) => ({ ...c, ...patch }));
+    if (live) { try { await apiPut("/api/settings", patch); return true; } catch (e) { return false; } }
+    return true; // démo : conservé en mémoire (non persisté sans backend)
+  };
+
   /* ---- Stats ---- */
   const wkStart = startOfWeek(TODAY);
   const weekSessions = history.filter((s) => startOfWeek(new Date(s.date)).getTime() === wkStart.getTime());
@@ -702,7 +710,8 @@ export default function App() {
             <Dashboard cfg={cfg} weight={effWeight} wkg={wkg} live={live} activities={activities} metrics={metrics}
               onSaveMetric={saveMetric} onImportMetrics={importMetrics}
               weekCount={weekSessions.length} totalCount={history.length} weekTonnage={weekTonnage} monthPRs={monthPRs}
-              active={active} onStart={startSession} onResume={() => setTab("session")} days={program.strength} />
+              active={active} onStart={startSession} onResume={() => setTab("session")} days={program.strength}
+              onOpenSettings={() => setTab("settings")} />
           )}
           {tab === "session" && (
             <Session active={active} upd={upd} onStartAny={startSession} onFinish={finishSession} onCancel={cancelSession} days={program.strength} />
@@ -717,6 +726,7 @@ export default function App() {
           )}
           {tab === "fitness" && <Fitness pmc={pmc} live={live} />}
           {tab === "nutri" && <Nutri plans={mealPlans} live={live} onSavePlan={saveMealPlan} onDeletePlan={deleteMealPlan} />}
+          {tab === "settings" && <Settings cfg={cfg} live={live} onSave={saveSettings} onBack={() => setTab("dash")} />}
         </main>
         <BottomNav tab={tab} setTab={setTab} activeBadge={!!active} />
       </div>
@@ -725,7 +735,7 @@ export default function App() {
 }
 
 /* ============================ TABLEAU DE BORD =========================== */
-function Dashboard({ cfg, weight, wkg, live, activities, metrics, onSaveMetric, onImportMetrics, weekCount, totalCount, weekTonnage, monthPRs, active, onStart, onResume, days }) {
+function Dashboard({ cfg, weight, wkg, live, activities, metrics, onSaveMetric, onImportMetrics, weekCount, totalCount, weekTonnage, monthPRs, active, onStart, onResume, days, onOpenSettings }) {
   const dGoal = daysBetween(cfg.event.date);
   const dNear = daysBetween(cfg.nearEvent.date);
   const kgToGoal = r05(weight - cfg.goalWeight);
@@ -743,7 +753,12 @@ function Dashboard({ cfg, weight, wkg, live, activities, metrics, onSaveMetric, 
           <div style={{ fontFamily: FD, fontWeight: 700, fontSize: 30, letterSpacing: "0.14em", lineHeight: 1 }}>SOMMET</div>
           <div style={{ fontFamily: FD, color: C.mut, letterSpacing: "0.26em", fontSize: 11, marginTop: 3 }}>SALUT {cfg.firstName?.toUpperCase()} · FORCE & PRÉVENTION</div>
         </div>
-        <StatusPill live={live} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <StatusPill live={live} />
+          <button onClick={onOpenSettings} aria-label="Réglages" style={{ width: 30, height: 30, borderRadius: 999, background: C.bg2, border: `1px solid ${C.line2}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+            <GearIcon />
+          </button>
+        </div>
       </div>
 
       {/* Bandeau objectif */}
@@ -2087,6 +2102,113 @@ function Stepper({ value, onChange }) {
   );
 }
 
+/* ============================== RÉGLAGES ================================ */
+function Settings({ cfg, live, onSave, onBack }) {
+  const [form, setForm] = useState({
+    firstName: cfg.firstName || "",
+    goalWeight: cfg.goalWeight != null ? String(cfg.goalWeight).replace(".", ",") : "",
+    wkgTarget: cfg.wkgTarget != null ? String(cfg.wkgTarget).replace(".", ",") : "",
+    eventName: cfg.event?.name || "",
+    eventDetail: cfg.event?.detail || "",
+    eventDate: cfg.event?.date || "",
+    nearName: cfg.nearEvent?.name || "",
+    nearDate: cfg.nearEvent?.date || "",
+  });
+  const [msg, setMsg] = useState("");
+  const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const save = async () => {
+    const patch = {
+      firstName: form.firstName.trim() || "Julien",
+      goalWeight: numFR(form.goalWeight),
+      wkgTarget: numFR(form.wkgTarget),
+      event: { name: form.eventName.trim(), detail: form.eventDetail.trim(), date: form.eventDate },
+      nearEvent: { name: form.nearName.trim(), date: form.nearDate },
+    };
+    if (patch.goalWeight == null || patch.wkgTarget == null || !patch.event.name || !patch.event.date || !patch.nearEvent.name || !patch.nearEvent.date) {
+      setMsg("Merci de remplir tous les champs (poids objectif, cible W/kg, événements avec leur date)."); return;
+    }
+    const ok = await onSave(patch);
+    setMsg(ok ? (live ? "Réglages enregistrés ✓" : "Réglages mis à jour (démo — non persisté sans backend)") : "Échec de l'enregistrement.");
+    setTimeout(() => setMsg(""), 3000);
+  };
+
+  return (
+    <div className="px-4 pt-5">
+      <div className="flex items-center gap-3 mb-1">
+        <button onClick={onBack} aria-label="Retour" style={{ width: 30, height: 30, borderRadius: 999, background: C.bg2, border: `1px solid ${C.line2}`, display: "grid", placeItems: "center", flexShrink: 0 }}>
+          <BackIcon />
+        </button>
+        <ScreenHead title="Réglages" sub="Prénom, objectifs, événements" />
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
+        <SettingsField label="PRÉNOM">
+          <TextInput value={form.firstName} onChange={set("firstName")} placeholder="Prénom" />
+        </SettingsField>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginTop: 12 }}>
+          <SettingsField label="POIDS OBJECTIF (KG)">
+            <TextInput value={form.goalWeight} onChange={set("goalWeight")} placeholder="85" />
+          </SettingsField>
+          <SettingsField label="CIBLE W/KG">
+            <TextInput value={form.wkgTarget} onChange={set("wkgTarget")} placeholder="4,0" />
+          </SettingsField>
+        </div>
+      </div>
+
+      <SectionTitle>Objectif principal</SectionTitle>
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
+        <SettingsField label="NOM DE L'ÉVÉNEMENT">
+          <TextInput value={form.eventName} onChange={set("eventName")} placeholder="Trail des Braconniers" />
+        </SettingsField>
+        <div style={{ marginTop: 12 }}>
+          <SettingsField label="DÉTAIL (DISTANCE · D+ · LIEU)">
+            <TextInput value={form.eventDetail} onChange={set("eventDetail")} placeholder="60 km · 3 000 m D+ · Collobrières" />
+          </SettingsField>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <SettingsField label="DATE">
+            <DateInput value={form.eventDate} onChange={set("eventDate")} />
+          </SettingsField>
+        </div>
+      </div>
+
+      <SectionTitle>Focus en cours</SectionTitle>
+      <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14 }}>
+        <SettingsField label="NOM">
+          <TextInput value={form.nearName} onChange={set("nearName")} placeholder="Étape du Tour" />
+        </SettingsField>
+        <div style={{ marginTop: 12 }}>
+          <SettingsField label="DATE">
+            <DateInput value={form.nearDate} onChange={set("nearDate")} />
+          </SettingsField>
+        </div>
+      </div>
+
+      <button onClick={save} className="w-full mt-4 mb-2" style={btnPrimary()}>ENREGISTRER</button>
+      {msg && <div style={{ textAlign: "center", fontSize: 12.5, color: /Échec|remplir/.test(msg) ? C.red : C.green, marginBottom: 8, fontFamily: FD }}>{msg}</div>}
+
+      <div style={{ color: C.mut2, fontSize: 11.5, lineHeight: 1.4, marginBottom: 16 }}>
+        Le poids actuel et la FTP viennent directement de Strava une fois connecté ; ils ne se règlent pas ici.
+      </div>
+    </div>
+  );
+}
+function SettingsField({ label, children }) { return (<div><div style={{ fontFamily: FD, letterSpacing: "0.1em", fontSize: 9.5, color: C.mut2, marginBottom: 4 }}>{label}</div>{children}</div>); }
+function TextInput({ value, onChange, placeholder }) {
+  return (
+    <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder}
+      style={{ width: "100%", boxSizing: "border-box", background: C.bg2, border: `1px solid ${C.line2}`, borderRadius: 9, color: C.text, fontFamily: FB, fontSize: 14.5, padding: "10px 11px", outline: "none" }} />
+  );
+}
+function DateInput({ value, onChange }) {
+  return (
+    <input type="date" value={value} onChange={(e) => onChange(e.target.value)}
+      style={{ width: "100%", boxSizing: "border-box", background: C.bg2, border: `1px solid ${C.line2}`, borderRadius: 9, color: C.text, fontFamily: FB, fontSize: 14.5, padding: "10px 11px", outline: "none" }} />
+  );
+}
+
 /* ============================= NAV & UI ================================ */
 function BottomNav({ tab, setTab, activeBadge }) {
   const items = [{ id: "dash", label: "Tableau", icon: IcGrid }, { id: "programme", label: "Prog.", icon: IcCal }, { id: "session", label: "Séance", icon: IcBolt, badge: activeBadge }, { id: "history", label: "Histo.", icon: IcClock }, { id: "progress", label: "Progrès", icon: IcChart }, { id: "fitness", label: "Forme", icon: IcPulse }, { id: "nutri", label: "Nutri", icon: IcApple }];
@@ -2155,3 +2277,5 @@ function SportIcon({ type }) {
       : <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 9v6M20 9v6M7 7v10M17 7v10M7 12h10" stroke={col} strokeWidth="1.8" strokeLinecap="round" /></svg>}
   </div>);
 }
+function GearIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 100-7 3.5 3.5 0 000 7z" stroke={C.mut} strokeWidth="1.7" /><path d="M19.4 13.5a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1.04 1.56V19.5a2 2 0 11-4 0v-.09a1.7 1.7 0 00-1.11-1.56 1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.7 1.7 0 00.34-1.87 1.7 1.7 0 00-1.56-1.04H4.5a2 2 0 110-4h.09a1.7 1.7 0 001.56-1.11 1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06a1.7 1.7 0 001.87.34H10.5a1.7 1.7 0 001.04-1.56V4.5a2 2 0 114 0v.09a1.7 1.7 0 001.04 1.56 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06a1.7 1.7 0 00-.34 1.87v.11a1.7 1.7 0 001.56 1.04h.09a2 2 0 110 4h-.09a1.7 1.7 0 00-1.56 1.04z" stroke={C.mut} strokeWidth="1.3" strokeLinejoin="round" /></svg>; }
+function BackIcon() { return <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M15 18l-6-6 6-6" stroke={C.text} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>; }

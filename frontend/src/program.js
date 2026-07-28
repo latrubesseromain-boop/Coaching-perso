@@ -17,6 +17,10 @@
    FTP bouge. Les watts écrits dans les séances (« 285–300 W · Z4 ») restent
    des PRESCRIPTIONS de séance : ils sont, eux, dans le JSON, et c'est à moi
    de te les recalculer quand ta FTP change.
+
+   SECTIONS OPTIONNELLES (ajoutées) : palme, apnea, core.
+   Elles sont toutes facultatives : un programme sans ces clés s'affiche
+   exactement comme avant. Voir validateProgram() pour leur format.
    ========================================================================= */
 
 /* -------------------- Zones de puissance (jamais dans le JSON) ----------- */
@@ -263,6 +267,7 @@ function deriveSessions(p) {
   (p.bike || []).forEach((b) => out.push({ id: b.id, label: `Vélo · ${b.name}`, short: `Vélo ${b.name}`, kind: "velo" }));
   (p.run || []).forEach((r) => out.push({ id: r.id, label: `Course · ${r.name}`, short: `Run ${r.name}`, kind: "cap" }));
   (p.strength || []).forEach((d) => out.push({ id: d.id, label: `Muscu · ${d.subtitle}`, short: `Muscu ${d.subtitle}`, kind: "muscu" }));
+  (p.palme || []).forEach((s) => out.push({ id: s.id, label: `Palme · ${s.name}`, short: `Palme ${s.name}`, kind: "palme" }));
   return out;
 }
 
@@ -277,6 +282,10 @@ export function normalizeProgram(p) {
   o.bike = Array.isArray(o.bike) ? o.bike : [];
   o.run = Array.isArray(o.run) ? o.run : [];
   o.paces = Array.isArray(o.paces) ? o.paces : [];
+  // Sections optionnelles ajoutées : toujours des tableaux/objets sûrs.
+  o.palme = Array.isArray(o.palme) ? o.palme : [];
+  o.apnea = o.apnea && typeof o.apnea === "object" ? o.apnea : null;
+  o.core = o.core && typeof o.core === "object" ? o.core : null;
   o.strength.forEach((d) => {
     d.cooldown = Array.isArray(d.cooldown) ? d.cooldown : [];
     (d.exercises || []).forEach((ex) => {
@@ -349,6 +358,33 @@ export function validateProgram(obj) {
     if (dup(r.id)) return `identifiant en double : « ${r.id} »`;
     if (!Array.isArray(r.steps) || !r.steps.length) return `séance course « ${r.id} » : « steps » manquant ou vide`;
   }
+
+  // -------- Sections optionnelles (palme, apnea, core) --------
+  // Toutes facultatives : absentes => OK. Présentes => format minimal contrôlé.
+  if (obj.palme != null) {
+    if (!Array.isArray(obj.palme)) return "« palme » doit être une liste (éventuellement vide)";
+    for (const s of obj.palme) {
+      if (!s.id || !s.name) return "chaque séance palme doit avoir id et name";
+      if (dup(s.id)) return `identifiant en double : « ${s.id} »`;
+      if (!Array.isArray(s.steps) || !s.steps.length) return `séance palme « ${s.id} » : « steps » manquant ou vide`;
+    }
+  }
+  if (obj.apnea != null) {
+    if (typeof obj.apnea !== "object" || Array.isArray(obj.apnea)) return "« apnea » doit être un objet { intro?, blocks?, tables? }";
+    if (obj.apnea.blocks != null && !Array.isArray(obj.apnea.blocks)) return "« apnea.blocks » doit être une liste";
+    if (obj.apnea.tables != null && !Array.isArray(obj.apnea.tables)) return "« apnea.tables » doit être une liste de tables CO2/O2";
+    for (const t of obj.apnea.tables || []) {
+      if (!t.name || !Array.isArray(t.rows)) return "chaque table d'apnée doit avoir name et rows (liste)";
+    }
+  }
+  if (obj.core != null) {
+    if (typeof obj.core !== "object" || Array.isArray(obj.core)) return "« core » doit être un objet { intro?, routines? }";
+    if (obj.core.routines != null && !Array.isArray(obj.core.routines)) return "« core.routines » doit être une liste";
+    for (const r of obj.core.routines || []) {
+      if (!r.name || !r.content) return "chaque routine de gainage doit avoir name et content";
+    }
+  }
+
   if (obj.sessions != null) {
     if (!Array.isArray(obj.sessions)) return "« sessions » doit être une liste";
     for (const s of obj.sessions) {

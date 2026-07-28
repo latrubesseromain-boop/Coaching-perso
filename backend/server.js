@@ -53,17 +53,17 @@ for (const col of ["fat REAL", "muscle REAL"]) {
   try { await db.exec(`ALTER TABLE metrics ADD COLUMN ${col}`); } catch (e) { /* colonne déjà présente */ }
 }
 
-// Réglages par défaut (dérivés du profil / de la cible ~4 W/kg)
+// Réglages par défaut (profil de Romain — cible ~4 W/kg à 64 kg)
 const DEFAULT_SETTINGS = {
-  firstName: "Julien",
-  goalWeight: 85,
+  firstName: "Romain",
+  goalWeight: 64,
   wkgTarget: 4.0,
-  event: { name: "Trail des Braconniers", detail: "60 km · 3 000 m D+ · Collobrières", date: "2027-05-15" },
-  nearEvent: { name: "Étape du Tour", date: "2026-07-19" },
-  sleep: { hours: "7 h 25", score: 79 },
+  event: { name: "Trail des Maures 100 km", detail: "100 km · Collobrières (Massif des Maures)", date: "2027-05-15" },
+  nearEvent: { name: "Nageur sauveteur héliporté", date: "2027-01-31" },
+  sleep: { hours: "8 h 30", score: 84 },
   weekPlan: {}, // choix HT/dehors + "fait" par séance endurance
   // valeurs de repli si Strava non connecté
-  weight: 88.1, ftp: 300, ftpEstimated: false,
+  weight: 74.4, ftp: 300, ftpEstimated: false,
 };
 async function getSettings() {
   const row = await db.prepare("SELECT value FROM settings WHERE key='app'").get();

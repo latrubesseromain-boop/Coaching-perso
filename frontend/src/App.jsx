@@ -1294,7 +1294,7 @@ function WeekBoard({ sessions, getDay, isDone, moving, setMoving, onMove, onRese
             <div className="flex flex-wrap gap-1.5" style={{ flex: 1 }}>
               {items.length === 0 && <span style={{ color: C.mut2, fontSize: 12 }}>repos</span>}
               {items.map((s) => {
-                const col = s.kind === "velo" ? C.orange : s.kind === "cap" ? C.green : C.blueHi;
+                const col = s.kind === "velo" ? C.orange : s.kind === "cap" ? C.green : s.kind === "palme" ? "#22C3D0" : C.blueHi;
                 const sel = moving === s.id, dn = isDone(s.id);
                 return (
                   <button key={s.id} onClick={(e) => { e.stopPropagation(); setMoving(sel ? null : s.id); }}
@@ -1449,6 +1449,32 @@ function Programme({ program, programs, zones, ftp, live, onSelectProgram, onSav
         </>
       )}
 
+      {/* PALME */}
+      {program.palme && program.palme.length > 0 && (
+        <>
+          <SectionTitle>Palme en mer</SectionTitle>
+          {program.palme.map((s) => (
+            <PalmeCard key={s.id} s={s} done={isDone(s.id)} day={DAY_LABELS[getDay(s.id)]} onToggleDone={() => onToggleDone(s.id)} open={!!open[s.id]} onToggle={() => tog(s.id)} />
+          ))}
+        </>
+      )}
+
+      {/* APNÉE */}
+      {program.apnea && (
+        <>
+          <SectionTitle>Apnée</SectionTitle>
+          <ApneaBlock apnea={program.apnea} open={!!open.apnea} onToggle={() => tog("apnea")} />
+        </>
+      )}
+
+      {/* GAINAGE */}
+      {program.core && (
+        <>
+          <SectionTitle>Gainage quotidien</SectionTitle>
+          <CoreBlock core={program.core} open={!!open.core} onToggle={() => tog("core")} />
+        </>
+      )}
+
       {/* Gérer le programme — désormais une donnée, plus du code */}
       <SectionTitle>Gérer le programme</SectionTitle>
       <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 8 }}>
@@ -1543,6 +1569,92 @@ function RunCard({ r, done, day, onToggleDone, open, onToggle }) {
         <span>{open ? "MASQUER LA SÉANCE" : "VOIR LA SÉANCE"}</span><Chevron open={open} />
       </button>
       {open && <div className="mt-2 flex flex-col gap-2">{r.steps.map((s, i) => <StepRow key={i} time={s.t} target={s.p} desc={s.d} color={C.green} />)}</div>}
+    </div>
+  );
+}
+
+/* ---- Palme : même logique visuelle que RunCard, couleur cyan ---- */
+const CYAN = "#22C3D0";
+function PalmeCard({ s, done, day, onToggleDone, open, onToggle }) {
+  return (
+    <div className="mb-3" style={{ background: C.card, border: `1px solid ${done ? C.greenLine : C.line}`, borderRadius: 14, padding: 13, position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: CYAN }} />
+      <div className="flex items-start justify-between">
+        <div style={{ paddingLeft: 4, flex: 1, minWidth: 0, paddingRight: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: FD, fontSize: 20, fontWeight: 600, lineHeight: 1.05 }}>{s.name}</div>
+            {s.tag && <TagChip t={s.tag} c={CYAN} />}
+            <DayBadge day={day} />
+          </div>
+          {(s.goal || s.dur) && <div style={{ color: C.mut, fontSize: 12.5, marginTop: 3 }}>{[s.goal, s.dur].filter(Boolean).join(" · ")}</div>}
+        </div>
+        <button onClick={onToggleDone}><CheckBox on={done} /></button>
+      </div>
+      <button onClick={onToggle} className="w-full" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, color: C.blueHi, fontFamily: FD, letterSpacing: "0.06em", fontSize: 13 }}>
+        <span>{open ? "MASQUER LA SÉANCE" : "VOIR LA SÉANCE"}</span><Chevron open={open} />
+      </button>
+      {open && <div className="mt-2 flex flex-col gap-2">{s.steps.map((st, i) => <StepRow key={i} time={st.t} target={st.w || st.p} desc={st.d} color={CYAN} />)}</div>}
+    </div>
+  );
+}
+
+/* ---- Apnée : intro + blocs (tableau Bloc/Contenu) + tables CO2/O2 ---- */
+function ApneaBlock({ apnea, open, onToggle }) {
+  return (
+    <div className="mb-3" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 13 }}>
+      {apnea.intro && <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.45, marginBottom: 4 }}>{apnea.intro}</div>}
+      <button onClick={onToggle} className="w-full" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, color: C.blueHi, fontFamily: FD, letterSpacing: "0.06em", fontSize: 13 }}>
+        <span>{open ? "MASQUER LE DÉTAIL" : "VOIR LE DÉTAIL"}</span><Chevron open={open} />
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-3">
+          {(apnea.blocks || []).map((b, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "96px 1fr", gap: 10, background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 10px" }}>
+              <div style={{ fontFamily: FD, fontSize: 13, fontWeight: 600, color: CYAN, lineHeight: 1.2 }}>{b.name}</div>
+              <div style={{ color: C.text, fontSize: 12.5, lineHeight: 1.35 }}>{b.content}</div>
+            </div>
+          ))}
+          {(apnea.tables || []).map((t, ti) => (
+            <div key={ti} style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "10px 10px 6px" }}>
+              <div style={{ fontFamily: FD, letterSpacing: "0.1em", fontSize: 11, color: CYAN, marginBottom: 2 }}>{t.name.toUpperCase()}</div>
+              {t.note && <div style={{ color: C.mut2, fontSize: 11, marginBottom: 8, lineHeight: 1.35 }}>{t.note}</div>}
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr 1fr", gap: 0 }}>
+                {(t.cols || ["Round", "Apnée", "Récup"]).map((c, i) => (
+                  <div key={i} style={{ fontFamily: FD, letterSpacing: "0.08em", fontSize: 10, color: C.mut2, padding: "3px 8px", borderBottom: `1px solid ${C.line}`, textAlign: i === 0 ? "left" : "center" }}>{c.toUpperCase()}</div>
+                ))}
+                {t.rows.map((row, ri) => (
+                  row.map((cell, ci) => (
+                    <div key={`${ri}-${ci}`} style={{ fontFamily: FD, fontSize: 13, color: ci === 0 ? C.mut : C.text, padding: "5px 8px", borderBottom: ri < t.rows.length - 1 ? `1px solid ${C.line}` : "none", textAlign: ci === 0 ? "left" : "center", fontWeight: ci === 0 ? 600 : 500 }}>{cell}</div>
+                  ))
+                ))}
+              </div>
+            </div>
+          ))}
+          {apnea.note && <div style={{ color: C.mut2, fontSize: 11.5, fontStyle: "italic", lineHeight: 1.4 }}>{apnea.note}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Gainage : intro + routines ---- */
+function CoreBlock({ core, open, onToggle }) {
+  return (
+    <div className="mb-3" style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 13 }}>
+      {core.intro && <div style={{ color: C.mut, fontSize: 12.5, lineHeight: 1.45, marginBottom: 4 }}>{core.intro}</div>}
+      <button onClick={onToggle} className="w-full" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, color: C.blueHi, fontFamily: FD, letterSpacing: "0.06em", fontSize: 13 }}>
+        <span>{open ? "MASQUER LES ROUTINES" : "VOIR LES ROUTINES"}</span><Chevron open={open} />
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-2">
+          {(core.routines || []).map((r, i) => (
+            <div key={i} style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 10, padding: "9px 10px" }}>
+              <div style={{ fontFamily: FD, fontSize: 13.5, fontWeight: 600, color: C.green, marginBottom: 2 }}>{r.name}</div>
+              <div style={{ color: C.text, fontSize: 12.5, lineHeight: 1.4 }}>{r.content}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

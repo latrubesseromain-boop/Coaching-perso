@@ -1423,7 +1423,7 @@ function Programme({ program, programs, zones, ftp, live, onSelectProgram, onSav
       {program.run.length > 0 && (
         <>
           <SectionTitle>Course à pied · allures cibles</SectionTitle>
-          {program.paces.length > 0 && <PacesRef paces={program.paces} />}
+          {program.runZones && <RunZonesRef runZones={program.runZones} />}
           {program.run.map((r) => (
             <RunCard key={r.id} r={r} done={isDone(r.id)} day={DAY_LABELS[getDay(r.id)]} onToggleDone={() => onToggleDone(r.id)} open={!!open[r.id]} onToggle={() => tog(r.id)} />
           ))}

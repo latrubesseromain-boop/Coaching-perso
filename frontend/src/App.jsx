@@ -536,6 +536,7 @@ export default function App() {
   const [weekPlan, setWeekPlan] = useState({}); // choix HT/dehors + "fait" par séance endurance
   const [metrics, setMetrics] = useState([]); // suivi quotidien poids + sommeil
   const [cardioDaily, setCardioDaily] = useState(CARDIO_DAILY); // charge cardio/jour (Strava)
+  const [loadSource, setLoadSource] = useState("strava"); // "strava" | "suunto" (Suunto prioritaire si présent)
   const [mealPlans, setMealPlans] = useState([]); // plans de repas stockés en base (vide = plan par défaut)
   const [programs, setPrograms] = useState([]);   // programmes stockés en base (vide = DEFAULT_PROGRAM)
   const [programStart, setProgramStart] = useState(null); // semaine de programme sélectionnée
@@ -567,7 +568,15 @@ export default function App() {
         setMetrics(mt.metrics || []);
         setLive(true);
         try { const a = await apiGet("/api/strava/activities"); if (!cancelled && a.activities) setActivities(a.activities); } catch (e) {}
-        try { const L = await apiGet("/api/strava/load"); if (!cancelled && L.daily) setCardioDaily(L.daily.map((x) => ({ date: x.date, re: x.load }))); } catch (e) {}
+        try {
+          const S = await apiGet("/api/load");
+          if (!cancelled && S.daily && S.daily.length) {
+            setCardioDaily(S.daily.map((x) => ({ date: x.date, re: x.load }))); setLoadSource("suunto");
+          } else {
+            const L = await apiGet("/api/strava/load");
+            if (!cancelled && L.daily) { setCardioDaily(L.daily.map((x) => ({ date: x.date, re: x.load }))); setLoadSource("strava"); }
+          }
+        } catch (e) {}
         try { const mp = await apiGet("/api/mealplan"); if (!cancelled && mp.plans) setMealPlans(mp.plans); } catch (e) {}
         try { const pg = await apiGet("/api/program"); if (!cancelled && pg.programs) setPrograms(pg.programs); } catch (e) {}
       } catch (e) {
@@ -576,6 +585,15 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, []);
+
+  // Recharge la charge Suunto depuis le backend (après un import .fit)
+  const refreshLoad = async () => {
+    try {
+      const S = await apiGet("/api/load");
+      if (S.daily && S.daily.length) { setCardioDaily(S.daily.map((x) => ({ date: x.date, re: x.load }))); setLoadSource("suunto"); return S.daily.length; }
+    } catch (e) {}
+    return 0;
+  };
 
   // Minuteur (séance + repos)
   useEffect(() => { if (!active) return; const id = setInterval(() => setTick((t) => t + 1), 1000); return () => clearInterval(id); }, [active]);
@@ -727,7 +745,7 @@ export default function App() {
               weekPlan={weekPlan} onSetMode={setBikeMode} onSetHours={setBikeHours} onToggleDone={toggleEnduranceDone}
               onSetDay={setSessionDay} onResetDays={resetSchedule} onStart={startSession} />
           )}
-          {tab === "fitness" && <Fitness pmc={pmc} live={live} />}
+          {tab === "fitness" && <Fitness pmc={pmc} live={live} loadSource={loadSource} onRefreshLoad={refreshLoad} />}
           {tab === "nutri" && <Nutri plans={mealPlans} live={live} onSavePlan={saveMealPlan} onDeletePlan={deleteMealPlan} />}
           {tab === "settings" && <Settings cfg={cfg} live={live} onSave={saveSettings} onBack={() => setTab("dash")} />}
         </main>
@@ -1779,14 +1797,55 @@ function acwrInfo(r) {
   return { label: "Risque de blessure accru", color: C.red };
 }
 
-function Fitness({ pmc, live }) {
+/* ---- Import Suunto : envoi des fichiers .fit au backend (parsés côté serveur) ---- */
+function SuuntoImport({ live, onRefreshLoad }) {
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  const onFiles = async (e) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    if (!live) { setMsg("Backend non joignable (mode aperçu) — import indisponible."); setTimeout(() => setMsg(""), 3000); return; }
+    setBusy(true); setMsg(`Import de ${files.length} fichier(s)…`);
+    let ok = 0, skipped = 0;
+    for (const f of files) {
+      try {
+        const buf = await f.arrayBuffer();
+        const r = await fetch("/api/load/import-fit", { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: buf });
+        const j = await r.json();
+        if (j.ok) ok += (j.imported ? j.imported.length : 1); else skipped++;
+      } catch (err) { skipped++; }
+    }
+    const n = await onRefreshLoad();
+    setBusy(false);
+    setMsg(`${ok} séance(s) importée(s)${skipped ? `, ${skipped} ignorée(s)` : ""} · charge sur ${n} jours.`);
+    setTimeout(() => setMsg(""), 6000);
+  };
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      <div style={{ fontFamily: FD, letterSpacing: "0.14em", fontSize: 11, color: "#22C3D0" }}>IMPORT SUUNTO · CHARGE D'ENTRAÎNEMENT</div>
+      <div style={{ color: C.mut, fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>
+        Exporte tes séances depuis l'app Suunto au format <b>.fit</b>, puis sélectionne-les ici (plusieurs possibles). Le TSS de chaque séance alimente ta Forme &amp; Fatigue.
+      </div>
+      <label style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 10, cursor: busy ? "default" : "pointer", ...btnGhost() }}>
+        <UploadIcon /> {busy ? "Import en cours…" : "Importer des fichiers .fit"}
+        <input type="file" accept=".fit" multiple onChange={onFiles} disabled={busy} style={{ display: "none" }} />
+      </label>
+      {msg && <div style={{ textAlign: "center", fontSize: 12, color: C.green, marginTop: 8, fontFamily: FD }}>{msg}</div>}
+    </div>
+  );
+}
+
+function Fitness({ pmc, live, loadSource, onRefreshLoad }) {
   const s = pmc && pmc.series ? pmc.series : [];
   const cur = pmc && pmc.current ? pmc.current : null;
+  const srcLabel = loadSource === "suunto" ? "données Suunto (TSS)" : (live ? "données Strava en direct" : "démo · tes données réelles");
   return (
     <div className="px-4 pt-5">
-      <ScreenHead title="FORME & FATIGUE" sub={`Modèle de charge · ${live ? "données Strava en direct" : "démo · tes données réelles"}`} />
+      <ScreenHead title="FORME & FATIGUE" sub={`Modèle de charge · ${srcLabel}`} />
+      <SuuntoImport live={live} onRefreshLoad={onRefreshLoad} />
       {!cur ? (
-        <div style={{ color: C.mut, fontSize: 13 }}>Pas encore assez de données d'activité pour établir la forme.</div>
+        <div style={{ color: C.mut, fontSize: 13, lineHeight: 1.5 }}>Pas encore assez de données pour établir la forme. Importe tes séances Suunto ci-dessus (ou connecte Strava depuis le tableau de bord).</div>
       ) : (
         <>
           <FitStateCards cur={cur} acwr={pmc.acwr} />
@@ -1796,7 +1855,7 @@ function Fitness({ pmc, live }) {
           <AcwrBar acwr={pmc.acwr} acute={pmc.acute} chronic={pmc.chronic} />
           <SectionTitle>Charge par semaine</SectionTitle>
           <WeeklyLoad series={s} />
-          <FitCaveats />
+          <FitCaveats loadSource={loadSource} />
         </>
       )}
     </div>
@@ -1941,12 +2000,14 @@ function WeeklyLoad({ series }) {
   );
 }
 
-function FitCaveats() {
+function FitCaveats({ loadSource }) {
   return (
     <div style={{ background: C.bg2, border: `1px solid ${C.line}`, borderRadius: 12, padding: 12, margin: "16px 0 8px" }}>
       <div style={{ fontFamily: FD, letterSpacing: "0.14em", fontSize: 11, color: C.gold, marginBottom: 6 }}>À LIRE — CE QUE CE MODÈLE EST ET N'EST PAS</div>
       <ul style={{ margin: 0, paddingLeft: 16, color: C.mut, fontSize: 12, lineHeight: 1.5 }}>
-        <li>La charge cardio vient de la <b>Charge relative Strava</b> (basée sur ta fréquence cardiaque). Elle est cohérente entre vélo, course et cardio, mais dépend de la FC : sans capteur, un jour sera sous-évalué.</li>
+        <li>{loadSource === "suunto"
+          ? <>La charge vient du <b>TSS Suunto</b> (champ training_stress_score de chaque .fit, basé sur l'EPOC/FC). Tu la mets à jour en important tes séances.</>
+          : <>La charge cardio vient de la <b>Charge relative Strava</b> (basée sur ta fréquence cardiaque). Elle est cohérente entre vélo, course et cardio, mais dépend de la FC : sans capteur, un jour sera sous-évalué.</>}</li>
         <li>La muscu compte pour <b>{STRENGTH_LOAD} points par séance</b> loguée dans l'app. C'est une <b>estimation assumée</b> : Strava n'attribue que 4–11 à la FC pour une séance de force, ce qui sous-évalue sa charge réelle. Valeur volontairement simple et ajustable.</li>
         <li>CTL/ATL/TSB suivent le modèle <b>impulse-response</b> (Banister ; PMC TrainingPeaks). Le <b>TSB positif</b> avant un objectif = affûté ; <b>négatif</b> = en charge (normal et productif en bloc dur).</li>
         <li>L'<b>ACWR</b> (Gabbett) est un <b>indicateur</b> de risque, pas une garantie : il complète tes signaux réels (genou, épaule, sommeil, RPE), il ne les remplace pas.</li>

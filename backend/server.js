@@ -46,6 +46,14 @@ await db.exec(`
   CREATE TABLE IF NOT EXISTS programs (
     start TEXT PRIMARY KEY, label TEXT, data TEXT, updated_at BIGINT
   );
+  CREATE TABLE IF NOT EXISTS training_load (
+    activity_id TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    load REAL,
+    sport TEXT,
+    source TEXT,
+    updated_at BIGINT
+  );
 `);
 // Migration douce : ajoute fat/muscle aux bases créées avant cette version.
 // (Sur une base neuve, ces colonnes existent déjà -> l'ALTER échoue et est ignoré.)
@@ -104,6 +112,79 @@ async function stravaGet(pathname) {
   const res = await fetch(`https://www.strava.com/api/v3${pathname}`, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) return null;
   return res.json();
+}
+
+/* ------------------------- FIT (Suunto) : parsing ----------------------- */
+// Décodeur FIT minimal, SANS dépendance. Extrait le message "session"
+// (global 18) de chaque fichier : sport, heure de début, et surtout le champ
+// standard training_stress_score (n°35, échelle 10 = TSS). C'est la charge.
+// Les champs développeur Suunto (EPOC, récup, VO2max, ressenti) sont ignorés ici.
+const FIT_EPOCH = 631065600; // secondes entre 1970-01-01 et 1989-12-31 (UTC)
+const FIT_SPORT = { 0: "generic", 1: "running", 2: "cycling", 5: "swimming", 10: "training", 11: "walking", 17: "hiking", 18: "multisport", 19: "paddling", 26: "openwater", 37: "diving" };
+
+function fitReadField(buf, off, size, bt, le) {
+  const dv = new DataView(buf.buffer, buf.byteOffset + off, size);
+  switch (bt) {
+    case 0x00: case 0x02: case 0x0A: case 0x0D: return buf[off];      // enum / uint8 / uint8z / byte
+    case 0x01: return dv.getInt8(0);                                   // sint8
+    case 0x83: return dv.getInt16(0, le);                             // sint16
+    case 0x84: case 0x8B: return dv.getUint16(0, le);                // uint16 / uint16z
+    case 0x85: return dv.getInt32(0, le);                            // sint32
+    case 0x86: case 0x8C: return dv.getUint32(0, le);              // uint32 / uint32z
+    case 0x88: return dv.getFloat32(0, le);                        // float32
+    case 0x89: return dv.getFloat64(0, le);                       // float64
+    default: return null;                                        // string / autres : non nécessaires
+  }
+}
+
+function parseFitSessions(buffer) {
+  const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer);
+  if (buf.length < 14) return [];
+  const hsize = buf[0];
+  const dsize = buf.readUInt32LE(4);
+  if (buf.toString("ascii", 8, 12) !== ".FIT") return [];
+  let pos = hsize;
+  const end = Math.min(buf.length, hsize + dsize);
+  const defs = {};
+  const sessions = [];
+  let fileStart = null;
+  while (pos < end) {
+    const hdr = buf[pos++];
+    if (hdr & 0x80) { // compressed timestamp header
+      const lt = (hdr >> 5) & 0x03;
+      const d = defs[lt]; if (!d) break;
+      const rec = {};
+      for (const f of d.fields) { rec[f.num] = fitReadField(buf, pos, f.size, f.bt, d.le); pos += f.size; }
+      for (const f of d.dev) pos += f.size;
+      if (d.global === 18) sessions.push(rec);
+      continue;
+    }
+    const isDef = hdr & 0x40, hasDev = hdr & 0x20, lt = hdr & 0x0F;
+    if (isDef) {
+      const arch = buf[pos + 1];
+      const le = arch === 0;
+      const global = le ? buf.readUInt16LE(pos + 2) : buf.readUInt16BE(pos + 2);
+      const nf = buf[pos + 4]; pos += 5;
+      const fields = [];
+      for (let i = 0; i < nf; i++) { fields.push({ num: buf[pos], size: buf[pos + 1], bt: buf[pos + 2] }); pos += 3; }
+      const dev = [];
+      if (hasDev) { const ndf = buf[pos++]; for (let i = 0; i < ndf; i++) { dev.push({ num: buf[pos], size: buf[pos + 1] }); pos += 3; } }
+      defs[lt] = { global, le, fields, dev };
+    } else {
+      const d = defs[lt]; if (!d) break;
+      const rec = {};
+      for (const f of d.fields) { rec[f.num] = fitReadField(buf, pos, f.size, f.bt, d.le); pos += f.size; }
+      for (const f of d.dev) pos += f.size;
+      if (d.global === 0 && fileStart == null) fileStart = rec[4] != null ? rec[4] : null; // file_id.time_created
+      if (d.global === 18) sessions.push(rec);
+    }
+  }
+  return sessions.map((s) => {
+    const st = s[2] != null ? s[2] : fileStart;
+    const date = st != null ? new Date((st + FIT_EPOCH) * 1000).toISOString().slice(0, 10) : null;
+    const tss = s[35] != null ? s[35] / 10 : null;
+    return { activityId: String(st != null ? st : (fileStart != null ? fileStart : Date.now())), date, load: tss, sport: FIT_SPORT[s[5]] || String(s[5] != null ? s[5] : "") };
+  });
 }
 
 /* ------------------------------- App ----------------------------------- */
@@ -193,6 +274,36 @@ app.post("/api/metrics/import", h(async (req, res) => {
     }
   });
   res.json({ ok: true, imported: rows.filter((m) => m.date).length });
+}));
+
+// Charge d'entraînement Suunto : import de fichiers .fit (parsés côté serveur)
+// et relecture agrégée par jour. Si cette table contient des données, le
+// frontend l'utilise à la place de la charge Strava.
+const UPSERT_LOAD = `INSERT INTO training_load(activity_id,date,load,sport,source,updated_at) VALUES(?,?,?,?,?,?)
+  ON CONFLICT(activity_id) DO UPDATE SET
+    date=excluded.date, load=excluded.load, sport=excluded.sport, source=excluded.source, updated_at=excluded.updated_at`;
+app.get("/api/load", h(async (req, res) => {
+  const rows = await db.prepare("SELECT date, SUM(load) AS load FROM training_load GROUP BY date ORDER BY date ASC").all();
+  res.json({ daily: rows.map((r) => ({ date: r.date, load: Number(r.load) || 0 })), count: rows.length, source: "suunto" });
+}));
+// Réception d'UN fichier .fit brut (application/octet-stream). Le client boucle
+// pour en envoyer plusieurs. Parsé ici, dédoublonné par activity_id.
+app.post("/api/load/import-fit", express.raw({ type: "*/*", limit: "25mb" }), h(async (req, res) => {
+  const body = req.body;
+  if (!body || !body.length) return res.status(400).json({ error: "fichier .fit vide" });
+  let parsed;
+  try { parsed = parseFitSessions(body); } catch (e) { return res.status(400).json({ error: "fichier FIT illisible" }); }
+  const sess = parsed.filter((s) => s.date && s.load != null);
+  if (!sess.length) return res.status(200).json({ ok: false, reason: "aucune charge (TSS) trouvée dans ce fichier" });
+  const now = Date.now();
+  await db.tx(async (t) => {
+    for (const s of sess) await t.run(UPSERT_LOAD, s.activityId, s.date, s.load, s.sport, "suunto", now);
+  });
+  res.json({ ok: true, imported: sess.map((s) => ({ date: s.date, load: s.load, sport: s.sport })) });
+}));
+app.post("/api/load/delete", h(async (req, res) => {
+  const info = await db.prepare("DELETE FROM training_load").run();
+  res.json({ ok: true, deleted: info.changes });
 }));
 
 // Plans de repas : stockés en base (données, plus dans le code). Une semaine = un plan (clé = start).

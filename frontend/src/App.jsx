@@ -1696,6 +1696,55 @@ function ZonesRef({ zones, ftp }) {
     </div>
     </>
   );
+} 
+/* ---- Zones de course (FC + allure) — rendu façon Strava (barres) ---- */
+const RUN_ZONE_COLORS = {
+  hr:   ["#F0A69E", "#E06B62", "#D33B32", "#AE2C25", "#7A1E19", "#5A1512", "#3E0D0B"],
+  pace: ["#AEC6EA", "#89A9E2", "#5E87D8", "#3E63C9", "#2C3F9E", "#1E2A66", "#141C4A"],
+};
+function RunZonesRef({ runZones }) {
+  if (!runZones || typeof runZones !== "object") return null;
+  const groups = [];
+  if (runZones.hr && Array.isArray(runZones.hr.zones)) groups.push({ key: "hr", ...runZones.hr });
+  if (runZones.pace && Array.isArray(runZones.pace.zones)) groups.push({ key: "pace", ...runZones.pace });
+  if (!groups.length) return null;
+  return (
+    <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      {groups.map((g, gi) => {
+        const ramp = RUN_ZONE_COLORS[g.key] || RUN_ZONE_COLORS.pace;
+        const maxPct = Math.max(1, ...g.zones.map((z) => Number(z.pct) || 0));
+        const titleCol = g.key === "hr" ? C.red : C.blueHi;
+        return (
+          <div key={g.key} style={{ marginTop: gi ? 16 : 0 }}>
+            <div style={{ fontFamily: FD, letterSpacing: "0.14em", fontSize: 12, color: titleCol }}>
+              {(g.title || (g.key === "hr" ? "Zones de fréquence cardiaque" : "Zones d'allure")).toUpperCase()}
+            </div>
+            {g.basis && <div style={{ color: C.mut2, fontSize: 11, marginTop: 2, marginBottom: 8 }}>Basé sur {g.basis}.</div>}
+            <div className="flex flex-col gap-1.5">
+              {g.zones.map((z, i) => {
+                const zn = parseInt(String(z.z).replace(/\D/g, ""), 10) || (i + 1);
+                const col = ramp[Math.min(ramp.length - 1, zn - 1)];
+                const pct = Number(z.pct);
+                const hasPct = !isNaN(pct);
+                const w = hasPct ? Math.max(2, (pct / maxPct) * 100) : 100;
+                return (
+                  <div key={z.z || i} style={{ display: "grid", gridTemplateColumns: "30px 1fr auto", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontFamily: FD, fontSize: 13, fontWeight: 700, color: col }}>{z.z}</span>
+                    <div style={{ position: "relative", height: 18, background: C.bg2, borderRadius: 5, overflow: "hidden", border: `1px solid ${C.line}` }}>
+                      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${w}%`, background: col, borderRadius: 5 }} />
+                      {hasPct && <span style={{ position: "absolute", left: 7, top: "50%", transform: "translateY(-50%)", fontFamily: FD, fontSize: 11, fontWeight: 700, color: w > 14 ? "#fff" : C.mut }}>{pct} %</span>}
+                    </div>
+                    <span style={{ fontFamily: FD, fontSize: 12, color: C.mut, whiteSpace: "nowrap", textAlign: "right" }}>{z.r}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {runZones.note && <div style={{ color: C.mut2, fontSize: 10.5, marginTop: 10, lineHeight: 1.4, fontStyle: "italic" }}>{runZones.note}</div>}
+    </div>
+  );
 }
 function PacesRef({ paces }) {
   return (

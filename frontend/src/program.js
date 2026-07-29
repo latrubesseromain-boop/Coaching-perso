@@ -389,6 +389,10 @@ export function validateProgram(obj) {
     if (!Array.isArray(obj.sessions)) return "« sessions » doit être une liste";
     for (const s of obj.sessions) {
       if (!s.id || !s.short) return "chaque vignette de « sessions » doit avoir id et short";
+      // Vignettes de gainage autonomes : leur détail vit dans « core » (routines),
+      // elles n'ont pas de bloc strength/bike/run/palme dédié. On enregistre leur
+      // id pour que « defaultDays » puisse aussi les référencer sans erreur.
+      if (s.kind === "gainage") { ids.add(s.id); continue; }
       if (!ids.has(s.id)) return `« sessions » référence « ${s.id} », qui n'existe dans aucune séance`;
     }
   }
